@@ -29,14 +29,23 @@ import Mathlib.Data.Prod.Lex
 import Mathlib.Order.Monotone.Basic
 import Mathlib.Tactic
 
+open List
+
 /-! ## §1  Sequences and monotonic subsequences -/
 
 section Sequences
 
-/-- A *subsequence* is given by a strictly increasing selection of indices. -/
+/-- A *subsequence* is given by a strictly increasing selection of indices.
+list l' is a subsequence of list l iff l' <+ l
+
+=== previous version ===
 def IsSubseq {α : Type*} (l sub : List α) : Prop :=
-  ∃ idxs : List (Fin l.length),
-    idxs.Pairwise (· < ·) ∧ sub = idxs.map (fun i => l.get i)
+  ∃ idxs : List ℕ,
+    idxs.length = sub.length ∧
+    (∀ i ∈ idxs, i < l.length) ∧
+    idxs.Pairwise (· < ·) ∧
+    sub = idxs.map (fun i => l.get i)
+-/
 
 def StrictlyIncreasing {α : Type*} [LT α] (l : List α) : Prop :=
   l.Pairwise (· < ·)
@@ -206,9 +215,47 @@ variable {α : Type*} [LinearOrder α]
     strictly increasing sequence indices, giving a subsequence. -/
 lemma path_is_subseq {l : List α} {G : SequenceGraph α}
     (wf : SGWellFormed l G) (p : SGPath G) :
+    (p.nodes.map SGNode.seqVal) <+ l := by
+
+      induction p.nodes
+      case nil => simp_all only [map_nil, nil_sublist]
+      case cons x xs ht =>
+        have hp : x ∈ p.nodes := by
+
+          sorry
+        have h0 : x.seqIdx < l.length := by
+          apply wf.node_indices
+          apply p.nodes_subset
+          apply hp
+        simp_all
+        refine cons_sublist_iff.mpr ?_
+        let l' : List α := l.take x.seqIdx
+        let l'' : List α := l.drop x.seqIdx
+        use l', l''
+        have h1 : l = l' ++ l'' := by
+          simp_all only [take_append_drop, l', l'']
+        constructor
+        · apply h1
+        · constructor
+          · have : x.seqVal = l[x.seqIdx] := by
+              apply wf.node_vals
+              apply p.nodes_subset
+              apply hp
+              simp
+              sorry
+            sorry
+          · have h2 : map SGNode.seqVal xs ∩ l' = ∅ := by
+              sorry
+            sorry
+
+        sorry
+
+      apply p.nodes_subset
+      apply wf.node_vals
     ∃ sub : List α,
       sub = p.nodes.map SGNode.seqVal ∧
-      IsSubseq l sub := by
+      (sub <+ l) := by
+
         let sub : List α :=
           p.nodes.map SGNode.seqVal
         use sub
@@ -232,10 +279,10 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
             · rw[List.length_map, List.length_map,List.length_attach]
             · intro n h1 h2
               simp
-              have : n < p.nodes.length := sorry
               have : p.nodes[n] ∈ G.nodes := by
                 grind
                 p.nodes_subset _ (List.getElem_mem h1)
+                sorry
               have : l[p.nodes[n].seqIdx] = l.get ⟨p.nodes[n].seqIdx, sorry⟩ := sorry
               sorry
             refine Eq.congr ?_ rfl
