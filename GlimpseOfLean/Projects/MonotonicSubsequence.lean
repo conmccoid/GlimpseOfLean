@@ -187,6 +187,25 @@ structure SGPath (G : SequenceGraph α) where
   -- All edges go left-to-right (NE or SE).
   leftToRight : ∀ e ∈ edges, e.dir.indexIncreases
 
+/-- For proof purposes, we define the initial portion of a path. -/
+def SGPath.init {G : SequenceGraph α} (p : SGPath G) (n : ℕ)
+  (h : n < p.nodes.length) (hn : n > 0) : SGPath G where
+  nodes := p.nodes.take n
+  edges := p.edges.take (n-1)
+  H := by simp[List.length_take, p.H]; omega
+  nonempty := by simp [List.take_eq_nil_iff, p.nonempty]; omega
+  nodes_subset := fun v hv => p.nodes_subset v (List.mem_of_mem_take hv)
+  edges_subset := fun e he => p.edges_subset e (List.mem_of_mem_take he)
+  connected := by
+    intro i
+    have hi_edge : i.val < p.edges.length := by
+      have := i.isLt; simp [List.length_take] at this; omega
+    have hconn := p.connected ⟨i.val, hi_edge⟩
+    simp only [List.get_eq_getElem] at *
+    simp only [List.getElem_take] at *
+    exact hconn
+  leftToRight := fun e he => p.leftToRight e (List.mem_of_mem_take he)
+
 /-- Number of NE edges in a path (witnesses increasing steps). -/
 def SGPath.neCount {G : SequenceGraph α} (p : SGPath G) : ℕ :=
   (p.edges.filter (fun e => e.dir == Dir.NE)).length
@@ -216,86 +235,26 @@ variable {α : Type*} [LinearOrder α]
 lemma path_is_subseq {l : List α} {G : SequenceGraph α}
     (wf : SGWellFormed l G) (p : SGPath G) :
     (p.nodes.map SGNode.seqVal) <+ l := by
-
-      induction p.nodes
-      case nil => simp_all only [map_nil, nil_sublist]
-      case cons x xs ht =>
-        have hp : x ∈ p.nodes := by
-
+      suffices h : ∀ n ≤ p.nodes.length, ∀ (q : SGPath G),
+        q.nodes.length = n → q.nodes.map SGNode.seqVal <+ l from by
+        exact h p.nodes.length (le_refl _) p rfl
+      intro n
+      induction n with
+      | zero =>
+        intro a q a_1
+        simp_all only [zero_le, length_eq_zero_iff, map_nil, nil_sublist]
+      | succ n ih =>
+        intro a r hr
+        have hn : n < r.nodes.length := by omega
+        have hn': n > 0 := by
           sorry
-        have h0 : x.seqIdx < l.length := by
-          apply wf.node_indices
-          apply p.nodes_subset
-          apply hp
-        simp_all
-        refine cons_sublist_iff.mpr ?_
-        let l' : List α := l.take x.seqIdx
-        let l'' : List α := l.drop x.seqIdx
-        use l', l''
-        have h1 : l = l' ++ l'' := by
-          simp_all only [take_append_drop, l', l'']
-        constructor
-        · apply h1
-        · constructor
-          · have : x.seqVal = l[x.seqIdx] := by
-              apply wf.node_vals
-              apply p.nodes_subset
-              apply hp
-              simp
-              sorry
-            sorry
-          · have h2 : map SGNode.seqVal xs ∩ l' = ∅ := by
-              sorry
-            sorry
-
+        let r' := r.init n hn hn'
+        have hr' : r'.nodes.length=n := by
+          sorry
         sorry
-
-      apply p.nodes_subset
-      apply wf.node_vals
-    ∃ sub : List α,
-      sub = p.nodes.map SGNode.seqVal ∧
-      (sub <+ l) := by
-
-        let sub : List α :=
-          p.nodes.map SGNode.seqVal
-        use sub
-        constructor
-        · rfl
-        · unfold IsSubseq
-          let idxs : List (Fin l.length) :=
-            p.nodes.attach.map fun v =>
-              ⟨v.1.seqIdx, by
-                apply wf.node_indices
-                apply p.nodes_subset
-                exact v.2⟩ --v.2 results from using .attach above, it states v.1 is a member of p.nodes
-          use idxs
-          constructor
-          · apply p.leftToRight
-            sorry
-          · simp[sub]
-            unfold idxs
-            rw[List.map_map, List.ext_get_iff]
-            constructor
-            · rw[List.length_map, List.length_map,List.length_attach]
-            · intro n h1 h2
-              simp
-              have : p.nodes[n] ∈ G.nodes := by
-                grind
-                p.nodes_subset _ (List.getElem_mem h1)
-                sorry
-              have : l[p.nodes[n].seqIdx] = l.get ⟨p.nodes[n].seqIdx, sorry⟩ := sorry
-              sorry
-            refine Eq.congr ?_ rfl
-            simp
-
-            apply p.nodes_subset
-            apply wf.node_vals
-            sorry
-
   -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
   -- show it is strictly increasing using leftToRight + edge_dir_idx,
   -- and that the values match using node_vals.
-  sorry
 
 end Lemma1
 
