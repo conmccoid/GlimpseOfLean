@@ -151,7 +151,7 @@ structure SequenceGraph (α : Type*) where
 structure SGWellFormed (l : List α) (G : SequenceGraph α) : Prop where
   graph_nodes : ∀ v ∈ G.nodes, PredicatesSGNode l v
   graph_edges : ∀ e ∈ G.edges, PredicatesSGEdge l e
-  -- no_duplicate_indices : (G.nodes.map SGNode.ind).Nodup *unnecessary due to biject
+  no_duplicate_indices : (G.nodes.map SGNode.ind).Nodup --unnecessary due to biject?
   biject : ∀ n : Fin l.length, ∃ v ∈ G.nodes, v.ind = n
 
 end SequenceGraph
@@ -215,31 +215,46 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
         let pi := p.nodes.get i
         have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
         apply hpi_i.indices
-      have h_val : ∀ i : Fin p.nodes.length,
-        (p.nodes.get i).val = l.get ⟨(p.nodes.get i).ind, by grind⟩ := by
-        intro i_val
-        let pi := p.nodes.get i_val
-        have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
-        apply hpi_i.values
-      have h_incInd : StrictlyIncreasing (p.nodes.map SGNode.ind) := by
-        let p_inds := p.nodes.map SGNode.ind
-        suffices hp_inds : StrictlyIncreasing p_inds from by grind
-        have h_pair : List.Pairwise (· < · ) p_inds := by
-          sorry
-        unfold StrictlyIncreasing
-        grind
-      rw [List.sublist_iff_exists_orderEmbedding_getElem?_eq]
-      let f : ℕ ↪o ℕ := {
-        toFun := fun i : ℕ => (p.nodes.get i).ind
+      -- have h_val : ∀ i : Fin p.nodes.length,
+      --   (p.nodes.get i).val = l.get ⟨(p.nodes.get i).ind, by grind⟩ := by
+      --   intro i_val
+      --   let pi := p.nodes.get i_val
+      --   have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
+      --   apply hpi_i.values
+      -- have h_incInd : StrictlyIncreasing (p.nodes.map SGNode.ind) := by
+      --   let p_inds := p.nodes.map SGNode.ind
+      --   suffices hp_inds : StrictlyIncreasing p_inds from by grind
+      --   have h_pair : List.Pairwise (· < · ) p_inds := by
+      --     sorry
+      --   unfold StrictlyIncreasing
+      --   grind
+      rw [List.sublist_iff_exists_fin_orderEmbedding_get_eq]
+      let f : Fin p.nodes.length ↪o Fin l.length := {
+        toFun := fun i : Fin p.nodes.length =>
+          ⟨(p.nodes.get ⟨i,by grind⟩).ind, by grind⟩
         inj' := by -- this should be the heart of the proof
-          unfold Function.Injective
-          intro a1 a2 a
+          -- by_contra h'
+          -- unfold Function.Injective
+          -- intro a1 a2
+          -- let pa1 := p.nodes[a1].ind
+          -- let pa2 := (p.nodes.get ⟨a2, by grind⟩).ind
+          -- simp
+          have H : (p.nodes.map SGNode.ind).Nodup := by
+            sorry
+          intro a1 a2 h
+          simp at h
+          refine (Nodup.get_inj_iff ?_).mp ?_
+          exact Nodup.of_map SGNode.ind H
           sorry
-        map_rel_iff' := by grind
+        map_rel_iff' := by sorry
         }
       use f
       intro ix
-      grind
+      let pi := p.nodes.get ⟨ix, by grind⟩
+      have hpi_i : PredicatesSGNode l pi := by apply hpi
+      let l_val := l.get (f ix)
+      simp
+      apply hpi_i.values
   -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
   -- show it is strictly increasing using leftToRight + edge_dir_idx,
   -- and that the values match using node_vals.
