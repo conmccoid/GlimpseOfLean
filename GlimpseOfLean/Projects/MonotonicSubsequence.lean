@@ -31,29 +31,22 @@ import Mathlib.Tactic
 
 open List
 
+variable {α : Type*} [LinearOrder α]
+
 /-! ## §1  Sequences and monotonic subsequences -/
 
 section Sequences
 
 /-- A *subsequence* is given by a strictly increasing selection of indices.
-list l' is a subsequence of list l iff l' <+ l
+list l' is a subsequence of list l iff l' <+ l -/
 
-=== previous version ===
-def IsSubseq {α : Type*} (l sub : List α) : Prop :=
-  ∃ idxs : List ℕ,
-    idxs.length = sub.length ∧
-    (∀ i ∈ idxs, i < l.length) ∧
-    idxs.Pairwise (· < ·) ∧
-    sub = idxs.map (fun i => l.get i)
--/
-
-def StrictlyIncreasing {α : Type*} [LT α] (l : List α) : Prop :=
+def StrictlyIncreasing (l : List α) : Prop :=
   l.Pairwise (· < ·)
 
-def StrictlyDecreasing {α : Type*} [LT α] (l : List α) : Prop :=
+def StrictlyDecreasing (l : List α) : Prop :=
   l.Pairwise (· > ·)
 
-def IsMonotonic {α : Type*} [LT α] (l : List α) : Prop :=
+def IsMonotonic (l : List α) : Prop :=
   StrictlyIncreasing l ∨ StrictlyDecreasing l
 
 end Sequences
@@ -121,46 +114,45 @@ section SequenceGraph
 -/
 
 /-- A node carries:
-    - `seqIdx`  : which position in the original sequence this node represents;
-    - `seqVal`  : the value at that position;
+    - `ind`  : which position in the original sequence this node represents;
+    - `val`  : the value at that position;
     - `pos`     : where the node sits in the grid. -/
 structure SGNode (α : Type*) where
-  seqIdx : ℕ
-  seqVal : α
-  pos    : GridPos
+  ind : ℕ
+  val : α
+  pos : GridPos
   deriving Repr
+
+structure PredicatesSGNode (l : List α) (node : SGNode α): Prop where
+  indices : node.ind < l.length
+  values  : node.val = l.get ⟨node.ind, indices⟩
 
 /-- An edge in a sequence graph. -/
 structure SGEdge (α : Type*) where
-  src : SGNode α
-  tgt : SGNode α
+  source : SGNode α
+  target : SGNode α
   dir : Dir
+
+structure PredicatesSGEdge (l : List α) (edge : SGEdge α): Prop where
+  adjacent : Adjacent edge.source.pos edge.target.pos
+  dir_ind  : edge.dir.indexIncreases ↔ edge.source.ind < edge.target.ind
+  dir_val  : edge.dir.valueIncreases ↔ edge.source.val < edge.target.val
+  position : edge.target.pos = edge.source.pos + dirVec edge.dir
 
 /-- A *sequence graph* for a list `l` is a collection of nodes and edges
     satisfying the adjacency conditions of Definition 1. -/
-structure SequenceGraph (α : Type*) [LinearOrder α] where
+structure SequenceGraph (α : Type*) where
   nodes : List (SGNode α)
   edges : List (SGEdge α)
-  -- Every node's seqIdx is a valid index into l.
+  -- Every node's `ind` is a valid index into l.
   -- (We leave l implicit here; the well-formedness predicate below binds it.)
 
 /-- Well-formedness of a sequence graph with respect to a sequence `l`. -/
-structure SGWellFormed {α : Type*} [LinearOrder α]
-    (l : List α) (G : SequenceGraph α) : Prop where
-  -- Nodes biject with some subset of positions of l.
-  node_indices : ∀ v ∈ G.nodes, v.seqIdx < l.length
-  node_vals    : ∀ v (h: v ∈ G.nodes), l.get ⟨v.seqIdx,node_indices v h⟩ = v.seqVal
-  node_nodup   : (G.nodes.map SGNode.seqIdx).Nodup
-  -- Edges connect adjacent grid positions.
-  edge_adjacent : ∀ e ∈ G.edges, Adjacent e.src.pos e.tgt.pos
-  -- Edge direction is consistent with sequence index and value.
-  edge_dir_idx : ∀ e ∈ G.edges,
-    e.dir.indexIncreases ↔ e.src.seqIdx < e.tgt.seqIdx
-  edge_dir_val : ∀ e ∈ G.edges,
-    e.dir.valueIncreases ↔ e.src.seqVal < e.tgt.seqVal
-  -- Grid position matches direction vector from parent.
-  edge_pos : ∀ e ∈ G.edges,
-    e.tgt.pos = e.src.pos + dirVec e.dir
+structure SGWellFormed (l : List α) (G : SequenceGraph α) : Prop where
+  graph_nodes : ∀ v ∈ G.nodes, PredicatesSGNode l v
+  graph_edges : ∀ e ∈ G.edges, PredicatesSGEdge l e
+  -- no_duplicate_indices : (G.nodes.map SGNode.ind).Nodup *unnecessary due to biject
+  biject : ∀ n : Fin l.length, ∃ v ∈ G.nodes, v.ind = n
 
 end SequenceGraph
 
@@ -168,43 +160,21 @@ end SequenceGraph
 
 section Paths
 
-variable {α : Type*} [LinearOrder α]
-
 /-- A *path* in a sequence graph is a list of nodes such that each consecutive
     pair is connected by an edge, and the path moves left-to-right
     (every edge goes NE or SE). -/
 structure SGPath (G : SequenceGraph α) where
   nodes : List (SGNode α)
   edges : List (SGEdge α)
-  H : edges.length = nodes.length - 1
+  lengths : edges.length = nodes.length - 1
   nodes_subset : ∀ v ∈ nodes, v ∈ G.nodes
   edges_subset : ∀ e ∈ edges, e ∈ G.edges
-  nonempty    : nodes ≠ []
+  nonempty     : nodes ≠ []
   -- Edges connect consecutive node pairs.
   connected   : ∀ i : Fin edges.length,
-    (edges.get i).src = nodes.get ⟨i.val, by grind⟩ ∧
-    (edges.get i).tgt = nodes.get ⟨i.val + 1, by grind⟩
+    ∃ e ∈ edges, e.source = nodes.get ⟨i, by grind⟩ ∧ e.target = nodes.get ⟨i+1, by grind⟩
   -- All edges go left-to-right (NE or SE).
   leftToRight : ∀ e ∈ edges, e.dir.indexIncreases
-
-/-- For proof purposes, we define the initial portion of a path. -/
-def SGPath.init {G : SequenceGraph α} (p : SGPath G) (n : ℕ)
-  (h : n < p.nodes.length) (hn : n > 0) : SGPath G where
-  nodes := p.nodes.take n
-  edges := p.edges.take (n-1)
-  H := by simp[List.length_take, p.H]; omega
-  nonempty := by simp [List.take_eq_nil_iff, p.nonempty]; omega
-  nodes_subset := fun v hv => p.nodes_subset v (List.mem_of_mem_take hv)
-  edges_subset := fun e he => p.edges_subset e (List.mem_of_mem_take he)
-  connected := by
-    intro i
-    have hi_edge : i.val < p.edges.length := by
-      have := i.isLt; simp [List.length_take] at this; omega
-    have hconn := p.connected ⟨i.val, hi_edge⟩
-    simp only [List.get_eq_getElem] at *
-    simp only [List.getElem_take] at *
-    exact hconn
-  leftToRight := fun e he => p.leftToRight e (List.mem_of_mem_take he)
 
 /-- Number of NE edges in a path (witnesses increasing steps). -/
 def SGPath.neCount {G : SequenceGraph α} (p : SGPath G) : ℕ :=
@@ -233,25 +203,43 @@ variable {α : Type*} [LinearOrder α]
     Proof: left-to-right edges go NE or SE, so consecutive nodes have
     strictly increasing sequence indices, giving a subsequence. -/
 lemma path_is_subseq {l : List α} {G : SequenceGraph α}
-    (wf : SGWellFormed l G) (p : SGPath G) :
-    (p.nodes.map SGNode.seqVal) <+ l := by
-      suffices h : ∀ n ≤ p.nodes.length, ∀ (q : SGPath G),
-        q.nodes.length = n → q.nodes.map SGNode.seqVal <+ l from by
-        exact h p.nodes.length (le_refl _) p rfl
-      intro n
-      induction n with
-      | zero =>
-        intro a q a_1
-        simp_all only [zero_le, length_eq_zero_iff, map_nil, nil_sublist]
-      | succ n ih =>
-        intro a r hr
-        have hn : n < r.nodes.length := by omega
-        have hn': n > 0 := by
+    (predicates : SGWellFormed l G) (p : SGPath G) :
+    (p.nodes.map SGNode.val) <+ l := by
+      have hpi : ∀ i : Fin p.nodes.length, PredicatesSGNode l (p.nodes.get i) := by
+        intro i
+        apply predicates.graph_nodes
+        apply p.nodes_subset
+        simp_all only [get_eq_getElem, getElem_mem]
+      have h_ind : ∀ i : Fin p.nodes.length, (p.nodes.get i).ind < l.length := by
+        intro i
+        let pi := p.nodes.get i
+        have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
+        apply hpi_i.indices
+      have h_val : ∀ i : Fin p.nodes.length,
+        (p.nodes.get i).val = l.get ⟨(p.nodes.get i).ind, by grind⟩ := by
+        intro i_val
+        let pi := p.nodes.get i_val
+        have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
+        apply hpi_i.values
+      have h_incInd : StrictlyIncreasing (p.nodes.map SGNode.ind) := by
+        let p_inds := p.nodes.map SGNode.ind
+        suffices hp_inds : StrictlyIncreasing p_inds from by grind
+        have h_pair : List.Pairwise (· < · ) p_inds := by
           sorry
-        let r' := r.init n hn hn'
-        have hr' : r'.nodes.length=n := by
+        unfold StrictlyIncreasing
+        grind
+      rw [List.sublist_iff_exists_orderEmbedding_getElem?_eq]
+      let f : ℕ ↪o ℕ := {
+        toFun := fun i : ℕ => (p.nodes.get i).ind
+        inj' := by -- this should be the heart of the proof
+          unfold Function.Injective
+          intro a1 a2 a
           sorry
-        sorry
+        map_rel_iff' := by grind
+        }
+      use f
+      intro ix
+      grind
   -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
   -- show it is strictly increasing using leftToRight + edge_dir_idx,
   -- and that the values match using node_vals.
