@@ -73,28 +73,18 @@ lemma adjacent_linf_one {p q : GridPos} (h : Adjacent p q) :
   simp [Adjacent, linfDist] at *
   omega
 
-/-- A *direction* of an edge encodes which of the four cases applies. -/
-inductive Dir | NE | NW | SE | SW deriving DecidableEq
+/-- The *direction* of an edge encodes whether the value increases or decreases. -/
+inductive Dir | SWNE | NWSE deriving DecidableEq
 
 def dirVec : Dir → ℤ × ℤ
-  | Dir.NE => (1,  1)
-  | Dir.NW => (-1, 1)
-  | Dir.SE => (1, -1)
-  | Dir.SW => (-1,-1)
+  | Dir.SWNE => ( 1, 1)
+  | Dir.NWSE => (-1, 1)
 
-/-- An edge moves northeast or southeast iff the index increases. -/
-def Dir.indexIncreases : Dir → Prop
-  | Dir.NE => True
-  | Dir.SE => True
-  | Dir.NW => False
-  | Dir.SW => False
-
-/-- An edge moves northeast or northwest iff the value increases. -/
+/-- An edge moves northeast or northwest iff the value increases.
+    Note that the index always increases, as edges only move left to right. -/
 def Dir.valueIncreases : Dir → Prop
-  | Dir.NE => True
-  | Dir.NW => True
-  | Dir.SE => False
-  | Dir.SW => False
+  | Dir.SWNE => True
+  | Dir.NWSE => False
 
 end Grid
 
@@ -105,9 +95,8 @@ section SequenceGraph
 /-!
   A sequence graph is a finite rectilinear graph in which:
     • nodes are labelled by distinct elements of a sequence;
-    • an edge from node a to node b goes NE if index(b) > index(a) and
-      value(b) > value(a), NW if index(b) < index(a) and value(b) > value(a),
-      SE if index(b) > index(a) and value(b) < value(a), SW otherwise.
+    • an edge from node a to node b goes from SW to NE if value(b) > value(a),
+      and NW to SE if value(b) < value(a).
 
   We represent a sequence graph as a list of nodes (with their grid positions
   and sequence indices) together with an edge relation.
@@ -135,7 +124,6 @@ structure SGEdge (α : Type*) where
 
 structure PredicatesSGEdge (l : List α) (edge : SGEdge α): Prop where
   adjacent : Adjacent edge.source.pos edge.target.pos
-  dir_ind  : edge.dir.indexIncreases ↔ edge.source.ind < edge.target.ind
   dir_val  : edge.dir.valueIncreases ↔ edge.source.val < edge.target.val
   position : edge.target.pos = edge.source.pos + dirVec edge.dir
 
@@ -154,6 +142,26 @@ structure SGWellFormed (l : List α) (G : SequenceGraph α) : Prop where
   no_duplicate_indices : (G.nodes.map SGNode.ind).Nodup --unnecessary due to biject?
   biject : ∀ n : Fin l.length, ∃ v ∈ G.nodes, v.ind = n
 
+lemma SGNode_valid_index {l : List α} {G : SequenceGraph α}
+  (wf : SGWellFormed l G) :
+  ∀ v ∈ G.nodes, v.ind < l.length := by
+    intro v h
+    suffices h1 : PredicatesSGNode l v from by
+      exact h1.indices
+    apply wf.graph_nodes
+    exact h
+
+lemma SGNode_seqVal {l : List α} {G : SequenceGraph α}
+  (wf : SGWellFormed l G) :
+  ∀ v ∈ G.nodes, v.val = l[v.ind]? := by
+      intro v h
+      suffices h1 : PredicatesSGNode l v from by
+        refine List.some_eq_getElem?_iff.mpr ?_
+        use SGNode_valid_index wf v h
+        simp [h1.values]
+      apply wf.graph_nodes
+      exact h
+
 end SequenceGraph
 
 /-! ## §4  Branches and paths -/
@@ -170,6 +178,7 @@ structure SGPath (G : SequenceGraph α) where
   nodes_subset : ∀ v ∈ nodes, v ∈ G.nodes
   edges_subset : ∀ e ∈ edges, e ∈ G.edges
   nonempty     : nodes ≠ []
+  -- I think these next two parts need to be rethought
   -- Edges connect consecutive node pairs.
   connected   : ∀ i : Fin edges.length,
     ∃ e ∈ edges, e.source = nodes.get ⟨i, by grind⟩ ∧ e.target = nodes.get ⟨i+1, by grind⟩
@@ -215,43 +224,47 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
         let pi := p.nodes.get i
         have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
         apply hpi_i.indices
-      -- have h_val : ∀ i : Fin p.nodes.length,
-      --   (p.nodes.get i).val = l.get ⟨(p.nodes.get i).ind, by grind⟩ := by
-      --   intro i_val
-      --   let pi := p.nodes.get i_val
-      --   have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
-      --   apply hpi_i.values
-      -- have h_incInd : StrictlyIncreasing (p.nodes.map SGNode.ind) := by
-      --   let p_inds := p.nodes.map SGNode.ind
-      --   suffices hp_inds : StrictlyIncreasing p_inds from by grind
-      --   have h_pair : List.Pairwise (· < · ) p_inds := by
-      --     sorry
-      --   unfold StrictlyIncreasing
-      --   grind
       rw [List.sublist_iff_exists_fin_orderEmbedding_get_eq]
-      let f : Fin p.nodes.length ↪o Fin l.length := {
-        toFun := fun i : Fin p.nodes.length =>
+      have h_length : (map SGNode.val p.nodes).length = p.nodes.length := by grind
+      let f : Fin (map SGNode.val p.nodes).length ↪o Fin l.length := {
+        toFun := fun i : Fin (map SGNode.val p.nodes).length =>
           ⟨(p.nodes.get ⟨i,by grind⟩).ind, by grind⟩
-        inj' := by -- this should be the heart of the proof
-          -- by_contra h'
-          -- unfold Function.Injective
-          -- intro a1 a2
-          -- let pa1 := p.nodes[a1].ind
-          -- let pa2 := (p.nodes.get ⟨a2, by grind⟩).ind
-          -- simp
-          have H : (p.nodes.map SGNode.ind).Nodup := by
-            sorry
+        inj' := by
           intro a1 a2 h
           simp at h
-          refine (Nodup.get_inj_iff ?_).mp ?_
-          exact Nodup.of_map SGNode.ind H
+          have HH : ∀ i1 i2 : Fin p.nodes.length, ((p.nodes.get i1).ind = (p.nodes.get i2).ind) → i1=i2 := by
+            refine fun i1 i2 a ↦ ?_
+            refine (Nodup.get_inj_iff ?_).mp ?_
+            have H : p.nodes.Nodup := by sorry
+            apply H
+            simp at a
+            simp
+            have H0: (map SGNode.ind p.nodes).Nodup := by sorry
+            refine (Nodup.getElem_inj_iff ?_).mpr ?_
+            apply H
+            sorry
+          simp_all only [get_eq_getElem]
+          exact (Fin.cast_inj h_length).mp (HH (Fin.cast h_length a1) (Fin.cast h_length a2) h)
+        map_rel_iff' := by  -- this should be the heart of the proof
+          intro a b
+          simp
+          have h_StrictlyIncreasing : StrictlyIncreasing (map SGNode.ind p.nodes) := by
+            let p_inds := p.nodes.map SGNode.ind
+            suffices hp_inds : StrictlyIncreasing p_inds from by grind
+            have h_pair : List.Pairwise (· < · ) p_inds := by
+              -- predicates.dir_ind
+              -- p.leftToRight
+              -- p.connected
+              -- Dir.indexIncreases
+              sorry
+            unfold StrictlyIncreasing
+            grind
           sorry
-        map_rel_iff' := by sorry
         }
       use f
       intro ix
       let pi := p.nodes.get ⟨ix, by grind⟩
-      have hpi_i : PredicatesSGNode l pi := by apply hpi
+      have hpi_i : PredicatesSGNode l (p.nodes.get ⟨ix, by grind⟩) := by apply hpi
       let l_val := l.get (f ix)
       simp
       apply hpi_i.values
