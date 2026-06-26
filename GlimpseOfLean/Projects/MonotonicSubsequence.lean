@@ -122,9 +122,10 @@ structure SGEdge (α : Type*) where
   target : SGNode α
   dir : Dir
 
-structure PredicatesSGEdge (l : List α) (edge : SGEdge α): Prop where
+structure PredicatesSGEdge (edge : SGEdge α): Prop where
   adjacent : Adjacent edge.source.pos edge.target.pos
   dir_val  : edge.dir.valueIncreases ↔ edge.source.val < edge.target.val
+  ind_inc  : edge.source.ind < edge.target.ind
   position : edge.target.pos = edge.source.pos + dirVec edge.dir
 
 /-- A *sequence graph* for a list `l` is a collection of nodes and edges
@@ -132,16 +133,16 @@ structure PredicatesSGEdge (l : List α) (edge : SGEdge α): Prop where
 structure SequenceGraph (α : Type*) where
   nodes : List (SGNode α)
   edges : List (SGEdge α)
-  -- Every node's `ind` is a valid index into l.
-  -- (We leave l implicit here; the well-formedness predicate below binds it.)
 
 /-- Well-formedness of a sequence graph with respect to a sequence `l`. -/
 structure SGWellFormed (l : List α) (G : SequenceGraph α) : Prop where
   graph_nodes : ∀ v ∈ G.nodes, PredicatesSGNode l v
-  graph_edges : ∀ e ∈ G.edges, PredicatesSGEdge l e
-  no_duplicate_indices : (G.nodes.map SGNode.ind).Nodup --unnecessary due to biject?
-  biject : ∀ n : Fin l.length, ∃ v ∈ G.nodes, v.ind = n
+  graph_edges : ∀ e ∈ G.edges, PredicatesSGEdge e
+  nodes_nodup : G.nodes.Nodup
+  edges_nodup : G.edges.Nodup
+  no_duplicate_indices : Function.Injective (fun node : SGNode α => node.ind)
 
+/-- For a well-formed sequence graph, node indices are valid indices into l. -/
 lemma SGNode_valid_index {l : List α} {G : SequenceGraph α}
   (wf : SGWellFormed l G) :
   ∀ v ∈ G.nodes, v.ind < l.length := by
@@ -151,6 +152,17 @@ lemma SGNode_valid_index {l : List α} {G : SequenceGraph α}
     apply wf.graph_nodes
     exact h
 
+/-- For a well-formed sequence graph, node indices are unique. -/
+lemma SGNode_unique_index {l : List α} {G : SequenceGraph α}
+  (wf : SGWellFormed l G) :
+  ∀ a1 a2 : Fin G.nodes.length, ((G.nodes.get a1).ind = (G.nodes.get a2).ind) → (a1=a2) := by
+    intro a1 a2 h
+    apply wf.no_duplicate_indices at h
+    refine (Nodup.get_inj_iff ?_).mp ?_
+    apply wf.nodes_nodup
+    exact h
+
+/-- For a well-formed sequence graph, node values equal elements of l. -/
 lemma SGNode_seqVal {l : List α} {G : SequenceGraph α}
   (wf : SGWellFormed l G) :
   ∀ v ∈ G.nodes, v.val = l[v.ind]? := by
@@ -172,31 +184,95 @@ section Paths
     pair is connected by an edge, and the path moves left-to-right
     (every edge goes NE or SE). -/
 structure SGPath (G : SequenceGraph α) where
-  nodes : List (SGNode α)
-  edges : List (SGEdge α)
-  lengths : edges.length = nodes.length - 1
-  nodes_subset : ∀ v ∈ nodes, v ∈ G.nodes
-  edges_subset : ∀ e ∈ edges, e ∈ G.edges
-  nonempty     : nodes ≠ []
-  -- I think these next two parts need to be rethought
-  -- Edges connect consecutive node pairs.
-  connected   : ∀ i : Fin edges.length,
-    ∃ e ∈ edges, e.source = nodes.get ⟨i, by grind⟩ ∧ e.target = nodes.get ⟨i+1, by grind⟩
-  -- All edges go left-to-right (NE or SE).
-  leftToRight : ∀ e ∈ edges, e.dir.indexIncreases
+  -- the path is a subgraph
+  path : SequenceGraph α
+  -- the path is well-formed
+  wf {l : List α} : SGWellFormed l path
+  lengths : path.edges.length = path.nodes.length - 1
+  nodes_subset : ∀ v ∈ path.nodes, v ∈ G.nodes
+  edges_subset : ∀ e ∈ path.edges, e ∈ G.edges
+  nonempty     : path.nodes ≠ []
+  Nodup        : path.nodes.Nodup ∧ path.edges.Nodup
+  -- what makes a path? for each node there is one edge that has this node as a source and one that has it as a target
+  connected : ∀ i : Fin (path.nodes.length-1),
+    (path.edges.get ⟨i,by grind⟩).source=path.nodes.get ⟨i,  by grind⟩ ∧
+    (path.edges.get ⟨i,by grind⟩).target=path.nodes.get ⟨i+1,by grind⟩
+  unidirectional : ∀ node ∈ path.nodes,
+    ((∃ e ∈ path.edges, e.source=node) ↔ (∃! e ∈ path.edges, e.source=node)) ∧
+    ((∃ e ∈ path.edges, e.target=node) ↔ (∃! e ∈ path.edges, e.target=node))
 
-/-- Number of NE edges in a path (witnesses increasing steps). -/
+/-- For paths in well-formed sequence graphs, node indices are valid indices into l. -/
+lemma SGPath_valid_index {l : List α} {G: SequenceGraph α} {p : SGPath G}
+  (wf : SGWellFormed l G) :
+  ∀ v ∈ p.path.nodes, v.ind < l.length := by
+    intro v h
+    have hG : v ∈ G.nodes := by
+      apply p.nodes_subset
+      exact Multiset.mem_coe.mp h
+    apply SGNode_valid_index wf
+    apply hG
+
+/-- For paths in well-formed sequence graphs, node indices are unique.
+    This is a really easy proof, and can probably be done in situ. -/
+lemma SGPath_unique_index {l : List α} {G : SequenceGraph α} {p : SGPath G} :
+  ∀ a1 a2 : Fin p.path.nodes.length, ((p.path.nodes.get a1).ind = (p.path.nodes.get a2).ind) → (a1=a2) := by
+    intro a1 a2 h
+    apply SGNode_unique_index p.wf
+    exact h
+    exact l.append l
+
+/-- For paths in well-formed sequence graphs, node indices are strictly increasing. -/
+lemma SGPath_index_increases {l : List α} {G : SequenceGraph α} {p : SGPath G}
+  (wf : SGWellFormed l G) :
+  StrictlyIncreasing (p.path.nodes.map SGNode.ind) := by
+    unfold StrictlyIncreasing
+    refine SortedLT.pairwise ?_
+    unfold SortedLT
+    unfold StrictMono
+
+    have h : ∀ i : Fin (p.path.nodes.length-1),
+      (p.path.nodes.get ⟨i,by grind⟩).ind < (p.path.nodes.get ⟨i+1,by grind⟩).ind := by
+      intro i
+      have hi : i < p.path.edges.length := by
+        rw [p.lengths]
+        simp_all only [Fin.is_lt]
+      let edge := p.path.edges.get ⟨i,by exact hi⟩
+      have he : edge.source=(p.path.nodes.get ⟨i,by grind⟩) ∧
+        edge.target=(p.path.nodes.get ⟨(i+1),by grind⟩) := by apply p.connected
+      -- replace the two nodes with edge.source and edge.target
+      rw[←he.1, ←he.2]
+      have h_inc : PredicatesSGEdge edge := by
+        apply wf.graph_edges
+        apply p.edges_subset
+        exact get_mem p.path.edges ⟨↑i, hi⟩
+      exact h_inc.ind_inc
+
+    intro a b hab
+    simp_all
+    -- this part provided by Claude; some interesting ideas here
+    have key : ∀ n m : ℕ, n < m → ∀ (hn : n < _) (hm : m < _),
+      p.path.nodes[n].ind < p.path.nodes[m].ind := by
+      intro n m hnm
+      induction hnm with
+      | refl => exact fun hn hm => h ⟨n, by grind⟩
+      | step hnm ih => exact fun hn hm =>
+          (ih (by grind) (by grind)).trans (h ⟨_, by grind⟩)
+    exact
+      Nat.lt_of_succ_le
+        (key (↑a) (↑b) hab (length_map SGNode.ind ▸ a.isLt) (length_map SGNode.ind ▸ b.isLt))
+
+/-- Number of SWNE edges in a path (witnesses increasing steps). -/
 def SGPath.neCount {G : SequenceGraph α} (p : SGPath G) : ℕ :=
-  (p.edges.filter (fun e => e.dir == Dir.NE)).length
+  (p.path.edges.filter (fun e => e.dir == Dir.SWNE)).length
 
-/-- Number of SE edges in a path (witnesses decreasing steps). -/
+/-- Number of NWSE edges in a path (witnesses decreasing steps). -/
 def SGPath.seCount {G : SequenceGraph α} (p : SGPath G) : ℕ :=
-  (p.edges.filter (fun e => e.dir == Dir.SE)).length
+  (p.path.edges.filter (fun e => e.dir == Dir.NWSE)).length
 
 /-- A *branch* is a path whose edges are all NE (ascending branch) or all SE
     (descending branch), maximal in the left-to-right direction. -/
 def IsBranch {G : SequenceGraph α} (p : SGPath G) : Prop :=
-  (∀ e ∈ p.edges, e.dir = Dir.NE) ∨ (∀ e ∈ p.edges, e.dir = Dir.SE)
+  (∀ e ∈ p.path.edges, e.dir = Dir.SWNE) ∨ (∀ e ∈ p.path.edges, e.dir = Dir.NWSE)
 
 end Paths
 
@@ -212,62 +288,54 @@ variable {α : Type*} [LinearOrder α]
     Proof: left-to-right edges go NE or SE, so consecutive nodes have
     strictly increasing sequence indices, giving a subsequence. -/
 lemma path_is_subseq {l : List α} {G : SequenceGraph α}
-    (predicates : SGWellFormed l G) (p : SGPath G) :
-    (p.nodes.map SGNode.val) <+ l := by
-      have hpi : ∀ i : Fin p.nodes.length, PredicatesSGNode l (p.nodes.get i) := by
-        intro i
-        apply predicates.graph_nodes
-        apply p.nodes_subset
-        simp_all only [get_eq_getElem, getElem_mem]
-      have h_ind : ∀ i : Fin p.nodes.length, (p.nodes.get i).ind < l.length := by
-        intro i
-        let pi := p.nodes.get i
-        have hpi_i : PredicatesSGNode l pi := by simp_all only [get_eq_getElem, pi]
-        apply hpi_i.indices
+    (wf : SGWellFormed l G) (p : SGPath G) :
+    (p.path.nodes.map SGNode.val) <+ l := by
       rw [List.sublist_iff_exists_fin_orderEmbedding_get_eq]
-      have h_length : (map SGNode.val p.nodes).length = p.nodes.length := by grind
-      let f : Fin (map SGNode.val p.nodes).length ↪o Fin l.length := {
-        toFun := fun i : Fin (map SGNode.val p.nodes).length =>
-          ⟨(p.nodes.get ⟨i,by grind⟩).ind, by grind⟩
+      have h_length : (map SGNode.val p.path.nodes).length = p.path.nodes.length := by grind
+      simp
+      let f : Fin p.path.nodes.length ↪o Fin l.length := {
+        toFun := fun i : Fin p.path.nodes.length =>
+          ⟨(p.path.nodes.get i).ind, by
+            apply SGPath_valid_index wf
+            exact get_mem p.path.nodes i⟩
         inj' := by
           intro a1 a2 h
-          simp at h
-          have HH : ∀ i1 i2 : Fin p.nodes.length, ((p.nodes.get i1).ind = (p.nodes.get i2).ind) → i1=i2 := by
-            refine fun i1 i2 a ↦ ?_
-            refine (Nodup.get_inj_iff ?_).mp ?_
-            have H : p.nodes.Nodup := by sorry
-            apply H
-            simp at a
-            simp
-            have H0: (map SGNode.ind p.nodes).Nodup := by sorry
-            refine (Nodup.getElem_inj_iff ?_).mpr ?_
-            apply H
-            sorry
-          simp_all only [get_eq_getElem]
-          exact (Fin.cast_inj h_length).mp (HH (Fin.cast h_length a1) (Fin.cast h_length a2) h)
+          simp_all
+          apply SGPath_unique_index
+          exact l.append l
+          exact h
         map_rel_iff' := by  -- this should be the heart of the proof
           intro a b
           simp
-          have h_StrictlyIncreasing : StrictlyIncreasing (map SGNode.ind p.nodes) := by
-            let p_inds := p.nodes.map SGNode.ind
-            suffices hp_inds : StrictlyIncreasing p_inds from by grind
-            have h_pair : List.Pairwise (· < · ) p_inds := by
-              -- predicates.dir_ind
-              -- p.leftToRight
-              -- p.connected
-              -- Dir.indexIncreases
-              sorry
-            unfold StrictlyIncreasing
-            grind
-          sorry
+          have hmono : StrictlyIncreasing (p.path.nodes.map SGNode.ind) := SGPath_index_increases wf
+          unfold StrictlyIncreasing at hmono
+          rw [List.pairwise_iff_get] at hmono
+          simp_all
+          constructor
+          · intro hba
+            by_contra hlt
+            push_neg at hlt
+            have := hmono (Fin.cast (by simp) b) (Fin.cast (by simp) a) (by simpa using hlt)
+            simp [Fin.cast] at this
+            omega
+          · intro hab
+            cases Nat.eq_or_lt_of_le hab with
+            | inl h => simp [Fin.ext_iff.mpr h]
+            | inr h => exact Nat.le_of_lt (hmono (Fin.cast (by simp) a) (Fin.cast (by simp) b) (by simpa using h))
         }
-      use f
+      use (Fin.castOrderIso (by simp)).toOrderEmbedding.trans f
       intro ix
-      let pi := p.nodes.get ⟨ix, by grind⟩
-      have hpi_i : PredicatesSGNode l (p.nodes.get ⟨ix, by grind⟩) := by apply hpi
-      let l_val := l.get (f ix)
-      simp
-      apply hpi_i.values
+      have hix : ix < p.path.nodes.length := by grind
+      have hl : p.path.nodes[↑ix].ind < l.length := by
+        apply SGPath_valid_index wf
+        exact mem_of_getElem rfl
+      simp_all
+      have hexact : p.path.nodes[↑ix].val = l[p.path.nodes[↑ix].ind] := by
+        apply SGNode_seqVal p.wf p.path.nodes[ix] ?_
+        rw [List.getElem?_eq_getElem] at h
+        sorry
+      show p.path.nodes[↑ix].val = l[p.path.nodes[↑ix].ind]
+      exact hexact
   -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
   -- show it is strictly increasing using leftToRight + edge_dir_idx,
   -- and that the values match using node_vals.
