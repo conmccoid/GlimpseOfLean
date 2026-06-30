@@ -330,12 +330,9 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
         apply SGPath_valid_index wf
         exact mem_of_getElem rfl
       simp_all
-      have hexact : p.path.nodes[↑ix].val = l[p.path.nodes[↑ix].ind] := by
-        apply SGNode_seqVal p.wf p.path.nodes[ix] ?_
-        rw [List.getElem?_eq_getElem] at h
-        sorry
       show p.path.nodes[↑ix].val = l[p.path.nodes[↑ix].ind]
-      exact hexact
+      have hexact := SGNode_seqVal (l:=l) p.wf p.path.nodes[ix] (mem_of_getElem rfl)
+      grind only [= Fin.getElem_fin, = getElem?_pos]
   -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
   -- show it is strictly increasing using leftToRight + edge_dir_idx,
   -- and that the values match using node_vals.
