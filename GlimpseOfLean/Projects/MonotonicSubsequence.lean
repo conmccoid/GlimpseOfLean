@@ -141,6 +141,7 @@ structure SGWellFormed (l : List α) (G : SequenceGraph α) : Prop where
   nodes_nodup : G.nodes.Nodup
   edges_nodup : G.edges.Nodup
   no_duplicate_indices : Function.Injective (fun node : SGNode α => node.ind)
+  nonempty : G.nodes ≠ []
 
 /-- For a well-formed sequence graph, node indices are valid indices into l. -/
 lemma SGNode_valid_index {l : List α} {G : SequenceGraph α}
@@ -200,6 +201,21 @@ structure SGPath (G : SequenceGraph α) where
   unidirectional : ∀ node ∈ path.nodes,
     ((∃ e ∈ path.edges, e.source=node) ↔ (∃! e ∈ path.edges, e.source=node)) ∧
     ((∃ e ∈ path.edges, e.target=node) ↔ (∃! e ∈ path.edges, e.target=node))
+
+def SGPath.init {G : SequenceGraph α} (p : SGPath G) (n : ℕ)
+  (h : n < p.path.nodes.length) (hn : n > 0) : SGPath G where
+    path : SequenceGraph α := {
+      nodes := p.path.nodes.take n
+      edges := p.path.edges.take (n-1)
+    }
+    wf {l : List α}:= SGWellFormed l path
+    lengths := sorry
+    nodes_subset := sorry
+    edges_subset := sorry
+    nonempty := sorry
+    Nodup := sorry
+    connected := sorry
+    unidirectional := sorry
 
 /-- For paths in well-formed sequence graphs, node indices are valid indices into l. -/
 lemma SGPath_valid_index {l : List α} {G: SequenceGraph α} {p : SGPath G}
@@ -317,7 +333,7 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
             push_neg at hlt
             have := hmono (Fin.cast (by simp) b) (Fin.cast (by simp) a) (by simpa using hlt)
             simp [Fin.cast] at this
-            omega
+            linarith
           · intro hab
             cases Nat.eq_or_lt_of_le hab with
             | inl h => simp [Fin.ext_iff.mpr h]
@@ -325,7 +341,7 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
         }
       use (Fin.castOrderIso (by simp)).toOrderEmbedding.trans f
       intro ix
-      have hix : ix < p.path.nodes.length := by grind
+      have hix : ix < p.path.nodes.length := by grind only
       have hl : p.path.nodes[↑ix].ind < l.length := by
         apply SGPath_valid_index wf
         exact mem_of_getElem rfl
@@ -333,11 +349,51 @@ lemma path_is_subseq {l : List α} {G : SequenceGraph α}
       show p.path.nodes[↑ix].val = l[p.path.nodes[↑ix].ind]
       have hexact := SGNode_seqVal (l:=l) p.wf p.path.nodes[ix] (mem_of_getElem rfl)
       grind only [= Fin.getElem_fin, = getElem?_pos]
-  -- sorry [3]: Construct the index list from p.nodes.map SGNode.seqIdx,
-  -- show it is strictly increasing using leftToRight + edge_dir_idx,
-  -- and that the values match using node_vals.
 
 end Lemma1
+
+/-! ## §6  Constructed graphs (Lemmas 2 & 3) -/
+
+section ConstructedGraph
+
+structure ConstructedGraph (l : List α) where
+  G : SequenceGraph α -- Lemma 2 (skipping construction step)
+  wf : SGWellFormed l G
+  -- for every node in the graph, there exists a path to the root node
+  root : SGNode α := G.nodes.head wf.nonempty
+  rootpath : ∀ v ∈ G.nodes, ∃ p : SGPath G,
+    p.path.nodes.head p.nonempty = root ∧ p.path.nodes.getLast p.nonempty = v
+  -- for every path between two nodes, if the first edge in the path is NWSE, then the last element in the path is smaller than the first
+  ordering : ∀ (p : SGPath G) (h : 1 < p.path.edges.length),
+    ((p.path.edges.head (by grind)).dir = Dir.NWSE →
+    (p.path.nodes.getLast p.nonempty).val < (p.path.nodes.head p.nonempty).val) ∧
+    ((p.path.edges.head (by grind)).dir = Dir.SWNE →
+    (p.path.nodes.getLast p.nonempty).val > (p.path.nodes.head p.nonempty).val)
+
+/-- **Lemma 3.** For any path `p` in a constructed sequence graph, there exists:
+    - a strictly increasing subsequence of `l` of length ≥ `p.neCount`, and
+    - a strictly decreasing subsequence of `l` of length ≥ `p.seCount`. -/
+lemma constructed_path_monotone {l : List α} {CG : ConstructedGraph l}
+  (p : SGPath CG.G) :
+    (∃ sub : List α, p.neCount ≤ sub.length ∧
+      StrictlyIncreasing sub ∧ sub <+ l) ∧
+    (∃ sub : List α, p.seCount ≤ sub.length ∧
+      StrictlyDecreasing sub ∧ sub <+ l) := by
+      constructor
+      · suffices h : ∀ n, ∀ (q : SGPath CG.G), q.path.nodes.length = n →
+          ∃ subq : List α, q.neCount ≤ subq.length ∧ StrictlyIncreasing subq ∧ subq <+ l by
+          exact h p.path.nodes.length p rfl
+        intro n
+        induction n with
+        | zero =>
+          intro q hq
+          exact absurd hq (by simp [q.nonempty])
+        | succ n ih =>
+          intro q hq
+          -- build a path out of the first n nodes of q
+          apply ih
+          sorry
+      · sorry
 
 /-! ## §6  Paths witness monotonic subsequences (Lemmas 3 & 4) -/
 
@@ -360,9 +416,9 @@ variable {α : Type*} [LinearOrder α]
 lemma path_witnesses_monotone {l : List α} {G : SequenceGraph α}
     (wf : SGWellFormed l G) (p : SGPath G) :
     (∃ sub : List α, p.neCount ≤ sub.length ∧
-      StrictlyIncreasing sub ∧ IsSubseq l sub) ∧
+      StrictlyIncreasing sub ∧ sub <+ l) ∧
     (∃ sub : List α, p.seCount ≤ sub.length ∧
-      StrictlyDecreasing sub ∧ IsSubseq l sub) := by
+      StrictlyDecreasing sub ∧ sub <+ l) := by
   /-
     sorry [4]: This is the main combinatorial content.
     Structure of the proof:
